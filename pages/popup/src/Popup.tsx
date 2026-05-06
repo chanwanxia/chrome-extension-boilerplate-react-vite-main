@@ -1,60 +1,28 @@
 import '@src/Popup.css';
-import { t } from '@extension/i18n';
-import { PROJECT_URL_OBJECT, useStorage, withErrorBoundary, withSuspense } from '@extension/shared';
-import { exampleThemeStorage } from '@extension/storage';
-import { cn, ErrorDisplay, LoadingSpinner, ToggleButton } from '@extension/ui';
-
-const notificationOptions = {
-  type: 'basic',
-  iconUrl: chrome.runtime.getURL('icon-34.png'),
-  title: 'Injecting content script error',
-  message: 'You cannot inject script here!',
-} as const;
+import { useBiliScraper } from './bilibili/useBiliScraper';
+import { withErrorBoundary, withSuspense } from '@extension/shared';
+import { cn, ErrorDisplay, LoadingSpinner } from '@extension/ui';
 
 const Popup = () => {
-  const { isLight } = useStorage(exampleThemeStorage);
-  const logo = isLight ? 'popup/logo_vertical.svg' : 'popup/logo_vertical_dark.svg';
-
-  const goGithubSite = () => chrome.tabs.create(PROJECT_URL_OBJECT);
-
-  const injectContentScript = async () => {
-    const [tab] = await chrome.tabs.query({ currentWindow: true, active: true });
-
-    if (tab.url!.startsWith('about:') || tab.url!.startsWith('chrome:')) {
-      chrome.notifications.create('inject-error', notificationOptions);
-    }
-
-    await chrome.scripting
-      .executeScript({
-        target: { tabId: tab.id! },
-        files: ['/content-runtime/example.iife.js', '/content-runtime/all.iife.js'],
-      })
-      .catch(err => {
-        // Handling errors related to other paths
-        if (err.message.includes('Cannot access a chrome:// URL')) {
-          chrome.notifications.create('inject-error', notificationOptions);
-        }
-      });
-  };
+  const { currentPageUrl, isBiliPage, isButtonDisabled, isLoading, handleScrapeBiliData } = useBiliScraper();
 
   return (
-    <div className={cn('App', isLight ? 'bg-slate-50' : 'bg-gray-800')}>
-      <header className={cn('App-header', isLight ? 'text-gray-900' : 'text-gray-100')}>
-        <button onClick={goGithubSite}>
-          <img src={chrome.runtime.getURL(logo)} className="App-logo" alt="logo" />
-        </button>
-        <p>
-          Edit <code>pages/popup/src/Popup.tsx</code>
-        </p>
+    <div className={cn('App', 'bg-slate-50')}>
+      <header className={cn('App-header', 'text-gray-900')}>
         <button
           className={cn(
-            'mt-4 rounded px-4 py-1 font-bold shadow hover:scale-105',
-            isLight ? 'bg-blue-200 text-black' : 'bg-gray-700 text-white',
+            'mt-4 rounded px-4 py-1 font-bold shadow transition-all',
+            isButtonDisabled
+              ? 'cursor-not-allowed bg-gray-300 text-gray-500'
+              : 'bg-pink-200 text-black hover:scale-105',
           )}
-          onClick={injectContentScript}>
-          {t('injectButton')}
+          onClick={handleScrapeBiliData}
+          disabled={isButtonDisabled}>
+          {isLoading ? '获取中...' : '获取bilibili数据'}
         </button>
-        <ToggleButton>{t('toggleTheme')}</ToggleButton>
+        {!isBiliPage && currentPageUrl && (
+          <p className="mt-2 text-xs text-red-500">仅在 search.bilibili.com 页面可用</p>
+        )}
       </header>
     </div>
   );
