@@ -16,14 +16,12 @@
     "dev": "vite build --mode development",
     "lint": "eslint .",
     "lint:fix": "pnpm lint --fix",
-    "format": "prettier . --write --ignore-path ../../.prettierignore",
-    "type-check": "tsc --noEmit"
+    "format": "prettier . --write --ignore-path ../../.prettierignore"
   },
   "dependencies": {
     "@extension/shared": "workspace:*"
   },
   "devDependencies": {
-    "@extension/tsconfig": "workspace:*",
     "@extension/vite-config": "workspace:*"
   }
 }

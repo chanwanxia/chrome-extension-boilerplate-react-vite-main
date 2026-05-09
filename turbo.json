@@ -3,28 +3,19 @@
   "ui": "tui",
   "globalEnv": ["CEB_*", "CLI_CEB_*"],
   "globalDependencies": [".env"],
-  "concurrency": "12",
+  "concurrency": "13",
   "tasks": {
-    "ready": {
-      "dependsOn": ["^ready"],
-      "outputs": ["../../dist/**", "dist/**"],
-      "cache": false
-    },
     "dev": {
-      "dependsOn": ["ready"],
       "outputs": ["../../dist/**", "dist/**"],
       "cache": false,
       "persistent": true
     },
     "build": {
-      "dependsOn": ["ready", "^build"],
+      "dependsOn": ["^build"],
       "outputs": ["../../dist/**", "dist/**"],
       "cache": false
     },
     "e2e": {
-      "cache": false
-    },
-    "type-check": {
       "cache": false
     },
     "lint": {

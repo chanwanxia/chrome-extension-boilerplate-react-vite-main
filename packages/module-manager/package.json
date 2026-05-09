@@ -6,7 +6,7 @@
   "private": true,
   "sideEffects": true,
   "scripts": {
-    "start": "tsx index.mts",
+    "start": "node index.js",
     "lint": "eslint .",
     "lint:fix": "pnpm lint --fix",
     "format": "prettier . --write --ignore-path ../../.prettierignore"
@@ -14,10 +14,7 @@
   "devDependencies": {
     "@extension/dev-utils": "workspace:*",
     "@extension/shared": "workspace:*",
-    "@extension/tsconfig": "workspace:*",
     "@inquirer/prompts": "^7.5.1",
-    "@types/yargs": "^17.0.33",
-    "tsx": "^4.19.4",
     "yargs": "^17.7.2"
   }
 }

@@ -5,21 +5,16 @@
   "type": "module",
   "private": true,
   "sideEffects": true,
-  "types": "index.mts",
-  "main": "dist/index.mjs",
-  "module": "dist/index.mjs",
+  "main": "index.js",
   "scripts": {
     "clean:node_modules": "pnpx rimraf node_modules",
-    "clean:bundle": "pnpx rimraf dist",
-    "clean": "pnpm clean:bundle && pnpm clean:node_modules",
-    "ready": "tsc -b"
+    "clean": "pnpm clean:node_modules"
   },
   "dependencies": {
     "@extension/env": "workspace:*"
   },
   "devDependencies": {
     "@extension/hmr": "workspace:*",
-    "@extension/tsconfig": "workspace:*",
     "@vitejs/plugin-react-swc": "^3.9.0"
   }
 }

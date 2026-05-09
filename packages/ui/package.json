@@ -5,21 +5,14 @@
   "type": "module",
   "private": true,
   "sideEffects": true,
-  "files": [
-    "dist/**"
-  ],
-  "types": "index.ts",
-  "main": "dist/index.js",
+  "main": "index.js",
   "scripts": {
-    "clean:bundle": "rimraf dist",
     "clean:node_modules": "pnpx rimraf node_modules",
     "clean:turbo": "rimraf .turbo",
-    "clean": "pnpm clean:bundle && pnpm clean:node_modules && pnpm clean:turbo",
-    "ready": "tsc -b && tsc-alias -p tsconfig.json",
+    "clean": "pnpm clean:node_modules && pnpm clean:turbo",
     "lint": "eslint .",
     "lint:fix": "pnpm lint --fix",
-    "format": "prettier . --write --ignore-path ../../.prettierignore",
-    "type-check": "tsc --noEmit"
+    "format": "prettier . --write --ignore-path ../../.prettierignore"
   },
   "dependencies": {
     "@extension/i18n": "workspace:*",
@@ -30,8 +23,6 @@
   },
   "devDependencies": {
     "@extension/tailwindcss-config": "workspace:*",
-    "@extension/tsconfig": "workspace:*",
-    "react-spinners": "^0.17.0",
-    "tsc-alias": "^1.8.16"
+    "react-spinners": "^0.17.0"
   }
 }

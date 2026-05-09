@@ -5,26 +5,16 @@
   "type": "module",
   "private": true,
   "sideEffects": false,
-  "files": [
-    "dist/**"
-  ],
-  "types": "index.mts",
-  "main": "dist/index.mjs",
+  "main": "index.js",
   "scripts": {
-    "clean:bundle": "rimraf dist",
     "clean:node_modules": "pnpx rimraf node_modules",
     "clean:turbo": "rimraf .turbo",
-    "clean": "pnpm clean:bundle && pnpm clean:node_modules && pnpm clean:turbo",
-    "ready": "tsc -b",
+    "clean": "pnpm clean:node_modules && pnpm clean:turbo",
     "lint": "eslint .",
     "lint:fix": "pnpm lint --fix",
-    "format": "prettier . --write --ignore-path ../../.prettierignore",
-    "type-check": "tsc --noEmit"
+    "format": "prettier . --write --ignore-path ../../.prettierignore"
   },
   "dependencies": {
     "@dotenvx/dotenvx": "^1.44.1"
-  },
-  "devDependencies": {
-    "@extension/tsconfig": "workspace:*"
   }
 }
