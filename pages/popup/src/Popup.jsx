@@ -71,6 +71,27 @@ const classifyErrorType = log => {
 };
 
 /**
+ * 从 “Failed to load resource ...” 的 message 中提取资源 URL 与状态码（如有）。
+ */
+const parseResourceLoadError = message => {
+  const text = String(message ?? '');
+  if (!/\bFailed to load resource\b/i.test(text) && !/\bresource=/.test(text)) return undefined;
+
+  const statusMatch = text.match(/status of\s+(\d+)\s*\(([^)]*)\)/i);
+  const status = statusMatch ? Number(statusMatch[1]) : undefined;
+  const statusText = statusMatch && statusMatch[2] ? String(statusMatch[2]).trim() : undefined;
+
+  const netErrMatch = text.match(/\b(net::ERR[^\s]+)\b/i);
+  const netError = netErrMatch ? String(netErrMatch[1]) : undefined;
+
+  const urlMatch = text.match(/\bhttps?:\/\/[^\s)]+/i);
+  const url = urlMatch ? String(urlMatch[0]) : undefined;
+
+  if (!url && typeof status !== 'number' && !netError) return undefined;
+  return { url, status, statusText, netError };
+};
+
+/**
  * 根据 message + errorType 给出较短的“原因分析”提示文案。
  */
 const guessCause = (message, errorType) => {
@@ -128,11 +149,13 @@ const analyzeLog = async log => {
   const occurredAt = typeof log?.occurredAt === 'string' ? log.occurredAt : undefined;
   const message = log?.message;
   const errorType = classifyErrorType(log);
+  const resource = errorType === '资源加载错误' ? parseResourceLoadError(message) : undefined;
 
   const analysis = {
     occurredAt,
     message,
     errorType,
+    resource,
     primaryFrame: primary,
     generated: undefined,
     cause: guessCause(message, errorType),
@@ -439,12 +462,14 @@ const Popup = () => {
           logs.map(item => {
             const isSelected = item.id === selectedLogId;
             const messageText = String(item.message ?? '');
+            const primary = pickPrimaryFrame(item?.frames) ?? item?.location;
             const loc = item.location;
             const locText =
               loc && typeof loc.url === 'string'
                 ? `${loc.url.split('/').slice(-1)[0]}:${loc.line ?? '-'}:${loc.column ?? '-'}`
                 : '';
             const level = item.level ?? item.kind ?? 'log';
+            const canArmBreakpoint = Boolean(primary?.url && typeof primary?.line === 'number');
             return (
               <div
                 key={item.id}
@@ -477,18 +502,20 @@ const Popup = () => {
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-col gap-1">
-                    <button
-                      className="rounded bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white"
-                      onClick={e => {
-                        e.stopPropagation();
-                        if (busy || locked) return;
-                        setSelectedLogId(item.id);
-                        void onArmBreakpoint(item);
-                      }}
-                      disabled={busy || locked}
-                      type="button">
-                      断点调试
-                    </button>
+                    {canArmBreakpoint ? (
+                      <button
+                        className="rounded bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white"
+                        onClick={e => {
+                          e.stopPropagation();
+                          if (busy || locked) return;
+                          setSelectedLogId(item.id);
+                          void onArmBreakpoint(item);
+                        }}
+                        disabled={busy || locked}
+                        type="button">
+                        断点调试
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -521,6 +548,22 @@ const Popup = () => {
 
                 <div className="mt-2 text-xs font-semibold">dist 分析</div>
                 <div className="mt-1 text-[12px] text-slate-700">错误类型：{analysis.errorType}</div>
+                {analysis.errorType === '资源加载错误' && analysis.resource ? (
+                  <div className="text-[12px] text-slate-700">
+                    {analysis.resource.url ? (
+                      <div className="mt-1 break-all">资源 URL：{analysis.resource.url}</div>
+                    ) : null}
+                    {typeof analysis.resource.status === 'number' ? (
+                      <div className="mt-1">
+                        状态码：{analysis.resource.status}
+                        {analysis.resource.statusText ? ` (${analysis.resource.statusText})` : ''}
+                      </div>
+                    ) : null}
+                    {analysis.resource.netError ? (
+                      <div className="mt-1">网络错误：{analysis.resource.netError}</div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="mt-1 text-[12px] text-slate-700">原因分析：{analysis.cause}</div>
                 {analysis.generated?.url ? (
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-slate-700">
