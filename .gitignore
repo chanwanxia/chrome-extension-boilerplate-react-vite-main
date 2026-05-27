@@ -8,9 +8,6 @@
 **/dist
 **/build
 **/dist-zip
-chrome-extension/manifest.js
-chrome-extension/pre-build.tsconfig.tsbuildinfo
-tsconfig.tsbuildinfo
 
 # env
 **/.env.*

@@ -22,7 +22,11 @@
     "@extension/shared": "workspace:*",
     "@extension/storage": "workspace:*",
     "@extension/i18n": "workspace:*",
-    "@extension/ui": "workspace:*"
+    "@extension/ui": "workspace:*",
+    "@babel/parser": "^7.28.0",
+    "@babel/traverse": "^7.28.0",
+    "highlight.js": "^11.11.1",
+    "prettier": "^3.5.3"
   },
   "devDependencies": {
     "@extension/tailwindcss-config": "workspace:*",
