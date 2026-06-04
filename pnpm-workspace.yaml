@@ -2,7 +2,6 @@ packages:
   - chrome-extension
   - pages/*
   - packages/*
-  - services/*
   - tests/*
 
 onlyBuiltDependencies:
