@@ -14,6 +14,18 @@ function parseTabId(msg) {
 export async function handlePopupMessage(msg, actions) {
   const type = msg?.type;
 
+  if (type === MESSAGE_TYPES.aiAnalyze) {
+    const apiKey = typeof msg?.apiKey === 'string' ? msg.apiKey.trim() : '';
+    if (!apiKey) return { ok: false, error: 'missing_apiKey' };
+
+    const error = msg?.error && typeof msg.error === 'object' ? msg.error : {};
+    const distText = typeof msg?.distText === 'string' ? msg.distText : '';
+    const meta = msg?.meta && typeof msg.meta === 'object' ? msg.meta : {};
+
+    if (typeof actions?.aiAnalyze !== 'function') return { ok: false, error: 'ai_not_supported' };
+    return actions.aiAnalyze({ apiKey, error, distText, meta });
+  }
+
   if (type === MESSAGE_TYPES.recorderStart) {
     const tabId = parseTabId(msg);
     if (tabId === null) return { ok: false, error: 'invalid_tabId' };

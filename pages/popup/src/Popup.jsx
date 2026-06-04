@@ -6,6 +6,33 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import CodeSnippet from '@src/components/CodeSnippet';
 import { extractDistContext, formatConsoleLikeError } from '@src/utils/distSnippet';
 
+const STORAGE_QWEN_KEY = 'agent.qwenKey.v1';
+
+const formatAiErrorMessage = err => {
+  const text = err instanceof Error ? err.message : String(err ?? '');
+  const m = text.match(/^qwen_http_(\d+)(?::\s*([\s\S]+))?$/);
+  if (!m) return text || 'ai_analyze_failed';
+  const status = Number(m[1]);
+  const raw = (m[2] ?? '').trim();
+  const json = raw
+    ? (() => {
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return null;
+        }
+      })()
+    : null;
+
+  if (status === 401) {
+    const remote = json?.error?.message ? String(json.error.message).trim() : '';
+    return `Qwen Key 无效或已过期（401）。${remote || '请在下方重新填写可用的 DashScope API Key。'}`;
+  }
+  if (status === 429) return '请求过于频繁或配额不足（429）。请稍后重试或检查账户额度。';
+  if (status === 403) return '无权限访问该模型/接口（403）。请检查账号权限或模型是否可用。';
+  return text;
+};
+
 /**
  * 向 background 发送消息并统一兜底 runtime.lastError。
  */
@@ -198,11 +225,26 @@ const Popup = () => {
   const [busy, setBusy] = useState(false);
   const [uiError, setUiError] = useState();
   const [uiNotice, setUiNotice] = useState();
+  const [qwenKey, setQwenKey] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState();
+  const [aiResult, setAiResult] = useState();
   const logsRef = useRef([]);
   const analyzeTokenRef = useRef(0);
 
   const selectedLog = useMemo(() => logs.find(l => l.id === selectedLogId), [logs, selectedLogId]);
   const locked = recording;
+
+  useEffect(() => {
+    try {
+      chrome.storage?.local?.get?.(STORAGE_QWEN_KEY, items => {
+        const stored = items && typeof items === 'object' ? items[STORAGE_QWEN_KEY] : undefined;
+        if (typeof stored === 'string' && stored.trim()) setQwenKey(stored);
+      });
+    } catch {
+      void 0;
+    }
+  }, []);
 
   /**
    * 同步 popup 展示数据：录制状态、日志列表、快照列表。
@@ -340,6 +382,8 @@ const Popup = () => {
     setUiNotice(undefined);
     setBusy(true);
     setAnalysis(undefined);
+    setAiError(undefined);
+    setAiResult(undefined);
     analyzeTokenRef.current += 1;
     const token = analyzeTokenRef.current;
     try {
@@ -349,6 +393,50 @@ const Popup = () => {
       if (token === analyzeTokenRef.current) setUiError(e instanceof Error ? e.message : 'analyze_failed');
     } finally {
       if (token === analyzeTokenRef.current) setBusy(false);
+    }
+  };
+
+  /**
+   * 触发 AI 诊断：把（错误日志 + dist 片段）发给 background，由 service worker 调用大模型。
+   */
+  const onAiAnalyze = async () => {
+    if (locked) return;
+    setAiError(undefined);
+    setAiResult(undefined);
+    if (!selectedLog) return setAiError('未选择日志');
+    if (!analysis) return setAiError('请先完成 dist 分析');
+    const apiKey = String(qwenKey ?? '').trim();
+    if (!apiKey) return setAiError('请先填写 Qwen Key');
+
+    const distText = analysis?.generated?.context?.text ? String(analysis.generated.context.text) : '';
+    const formatted = formatConsoleLikeError(selectedLog);
+
+    setAiBusy(true);
+    try {
+      const resp = await sendMessage({
+        type: 'AGENT_AI_ANALYZE',
+        apiKey,
+        error: {
+          occurredAt: selectedLog.occurredAt,
+          message: String(selectedLog.message ?? ''),
+          stack: formatted,
+        },
+        distText,
+        meta: {
+          errorType: analysis.errorType,
+          guessedCause: analysis.cause,
+          primaryFrame: analysis.primaryFrame,
+        },
+      });
+      if (!resp?.ok) throw new Error(resp?.error ?? 'ai_analyze_failed');
+      setAiResult({
+        cause: typeof resp.cause === 'string' ? resp.cause : '',
+        suggestion: typeof resp.suggestion === 'string' ? resp.suggestion : '',
+      });
+    } catch (e) {
+      setAiError(formatAiErrorMessage(e));
+    } finally {
+      setAiBusy(false);
     }
   };
 
@@ -586,6 +674,62 @@ const Popup = () => {
                     )}
                   </>
                 ) : null}
+
+                <div className="mt-2 text-xs font-semibold">AI 分析</div>
+                <div className="mt-1 grid gap-2">
+                  <div className="grid gap-1">
+                    <div className="text-[12px] text-slate-700">Qwen Key</div>
+                    <input
+                      className="w-full rounded border border-slate-200 bg-white px-2 py-1 text-[12px] text-slate-900"
+                      value={qwenKey}
+                      onChange={e => {
+                        const v = e.target.value;
+                        setQwenKey(v);
+                        try {
+                          chrome.storage?.local?.set?.({ [STORAGE_QWEN_KEY]: v });
+                        } catch {
+                          void 0;
+                        }
+                      }}
+                      placeholder="请输入可用的Qwen Key"
+                      type="textarea"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="rounded bg-emerald-600 px-2 py-1 text-[11px] font-medium text-white"
+                      onClick={onAiAnalyze}
+                      disabled={aiBusy || locked || !String(qwenKey ?? '').trim()}
+                      type="button">
+                      {aiBusy ? '分析中...' : 'AI 诊断'}
+                    </button>
+                    <div className="text-[11px] text-slate-500">
+                      {analysis.generated?.context?.text
+                        ? '基于 dist 片段 + 错误日志'
+                        : '未找到 dist 片段，将仅基于错误日志'}
+                    </div>
+                  </div>
+
+                  {aiError ? (
+                    <div className="whitespace-pre-wrap break-words rounded bg-red-50 px-2 py-1 text-left text-xs text-red-700">
+                      {aiError}
+                    </div>
+                  ) : null}
+
+                  {aiResult ? (
+                    <div className="grid gap-2">
+                      <div>
+                        <div className="text-[12px] font-semibold text-slate-900">错误原因</div>
+                        <pre className="analysis-pre analysis-pre--wrap mt-1">{aiResult.cause || '-'}</pre>
+                      </div>
+                      <div>
+                        <div className="text-[12px] font-semibold text-slate-900">修改建议</div>
+                        <pre className="analysis-pre analysis-pre--wrap mt-1">{aiResult.suggestion || '-'}</pre>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
               </>
             ) : null}
           </div>

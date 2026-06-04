@@ -27,6 +27,7 @@ chrome-extension/
   │     │  ├─ popupMessages.js      # 处理来自 popup 的指令
   │     │  └─ contentMessages.js    # 处理来自 content-script 的消息
   │     └─ services/         # 业务服务层
+  │        ├─ aiService.js     #  AI错误诊断
   │        ├─ storageService.js     # 存储封装（Promise 化）
   │        ├─ errorService.js       # 错误/日志/快照处理
   │        └─ performanceService.js     # 网络请求监控与慢日志分析

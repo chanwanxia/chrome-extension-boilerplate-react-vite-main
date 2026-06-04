@@ -21,6 +21,7 @@ import {
   handleNetworkRequestWillBeSent,
   handleNetworkResponseReceived,
 } from '../services/performanceService.js';
+import { analyzeErrorWithQwen } from '../services/aiService.js';
 
 const autoResumeOnceByTabId = new Map();
 
@@ -335,10 +336,19 @@ function registerDebuggerEvents() {
 }
 
 /**
+ * AI 自动诊断：调用 Qwen 输出错误原因与修复建议。
+ */
+async function aiAnalyze({ apiKey, error, distText, meta }) {
+  const result = await analyzeErrorWithQwen({ apiKey, error, distText, meta });
+  return { ok: true, ...result };
+}
+
+/**
  * 注册 chrome.runtime.onMessage 监听：统一走路由处理，并安全返回 sendResponse。
  */
 function registerRuntimeMessages() {
   const actions = {
+    aiAnalyze,
     startRecording,
     stopRecording,
     getStatus,

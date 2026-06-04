@@ -42,6 +42,7 @@ export const MESSAGE_TYPES = {
   snapshotsGet: 'AGENT_SNAPSHOTS_GET',
   breakpointArm: 'AGENT_BREAKPOINT_ARM',
   debuggerResume: 'AGENT_DEBUGGER_RESUME',
+  aiAnalyze: 'AGENT_AI_ANALYZE',
   logsUpdated: 'AGENT_LOGS_UPDATED',
   snapshotsUpdated: 'AGENT_SNAPSHOTS_UPDATED',
 };
