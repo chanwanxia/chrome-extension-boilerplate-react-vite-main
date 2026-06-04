@@ -43,6 +43,7 @@ export const MESSAGE_TYPES = {
   breakpointArm: 'AGENT_BREAKPOINT_ARM',
   debuggerResume: 'AGENT_DEBUGGER_RESUME',
   aiAnalyze: 'AGENT_AI_ANALYZE',
+  aiAgentLoop: 'AGENT_AI_AGENT_LOOP',
   logsUpdated: 'AGENT_LOGS_UPDATED',
   snapshotsUpdated: 'AGENT_SNAPSHOTS_UPDATED',
 };

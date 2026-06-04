@@ -3,11 +3,26 @@ import { withErrorBoundary, withSuspense } from '@extension/shared/react';
 import { cn, ErrorDisplay, LoadingSpinner } from '@extension/ui/react';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import CodeSnippet from '@src/components/CodeSnippet';
-import { extractDistContext, formatConsoleLikeError } from '@src/utils/distSnippet';
+import LogList from '@src/components/LogList';
+import AnalysisPanel from '@src/components/AnalysisPanel';
+import { sendRuntimeMessage } from '@src/utils/chrome';
+import {
+  analyzeLog,
+  getIssuePrimaryLocation,
+  isIssueRelatedLog,
+  isIssueRelatedSnapshot,
+  pickPrimaryFrame,
+} from '@src/utils/popupAnalysis';
+import { formatConsoleLikeError } from '@src/utils/distSnippet';
+import { usePopupRecorder } from '@src/hooks/usePopupRecorder';
 
 const STORAGE_QWEN_KEY = 'agent.qwenKey.v1';
 
+/**
+ * 把 background 抛出的 AI 错误（含 qwen_http_ 状态码）转成更可读的提示文案。
+ * @param {unknown} err
+ * @returns {string}
+ */
 const formatAiErrorMessage = err => {
   const text = err instanceof Error ? err.message : String(err ?? '');
   const m = text.match(/^qwen_http_(\d+)(?::\s*([\s\S]+))?$/);
@@ -34,192 +49,10 @@ const formatAiErrorMessage = err => {
 };
 
 /**
- * 向 background 发送消息并统一兜底 runtime.lastError。
- */
-const sendMessage = message =>
-  new Promise(resolve => {
-    chrome.runtime.sendMessage(message, response => {
-      const err = chrome.runtime?.lastError;
-      if (err) resolve({ ok: false, error: err.message });
-      else resolve(response);
-    });
-  });
-
-/**
- * 获取当前窗口激活标签页 id。
- */
-const getActiveTabId = () =>
-  new Promise(resolve => {
-    chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-      const tabId = tabs && tabs[0] && typeof tabs[0].id === 'number' ? tabs[0].id : undefined;
-      resolve(tabId);
-    });
-  });
-
-/**
- * 本地时间格式化（iso -> HH:mm:ss）。
- */
-const formatLocalTime = iso => {
-  const ts = Date.parse(String(iso ?? ''));
-  if (!Number.isFinite(ts)) return '';
-  try {
-    return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  } catch {
-    return new Date(ts).toTimeString().slice(0, 8);
-  }
-};
-
-/**
- * 从堆栈帧列表里挑一个最可能属于当前扩展/业务代码的帧，用于定位 dist 产物位置。
- */
-const pickPrimaryFrame = frames => {
-  if (!Array.isArray(frames)) return undefined;
-  return (
-    frames.find(f => typeof f?.url === 'string' && f.url.startsWith('chrome-extension://')) ??
-    frames.find(f => typeof f?.url === 'string' && !f.url.startsWith('extensions::')) ??
-    frames[0]
-  );
-};
-
-/**
- * 对日志 message 做粗分类，用于给出更贴近场景的排查建议。
- */
-const classifyErrorType = log => {
-  const kind = String(log?.kind ?? '');
-  const text = String(log?.message ?? '');
-  if (/\bSyntaxError\b/.test(text)) return '语法错误';
-  if (/\[AGENT_HOOK\]\s*unhandledrejection/i.test(text) || /\bunhandledrejection\b/i.test(text)) return 'Promise错误';
-  if (/\bFailed to load resource\b/i.test(text) || /\bresource=/.test(text)) return '资源加载错误';
-  if (/\bFailed to fetch\b/i.test(text) || /\bNetworkError\b/i.test(text) || /\bnet::ERR\b/.test(text))
-    return '网络请求错误';
-  if (kind === 'exception') return 'JS执行错误';
-  if (/\bTypeError\b|\bReferenceError\b|\bRangeError\b|\bURIError\b|\bEvalError\b/.test(text)) return 'JS执行错误';
-  return 'JS执行错误';
-};
-
-/**
- * 从 “Failed to load resource ...” 的 message 中提取资源 URL 与状态码（如有）。
- */
-const parseResourceLoadError = message => {
-  const text = String(message ?? '');
-  if (!/\bFailed to load resource\b/i.test(text) && !/\bresource=/.test(text)) return undefined;
-
-  const statusMatch = text.match(/status of\s+(\d+)\s*\(([^)]*)\)/i);
-  const status = statusMatch ? Number(statusMatch[1]) : undefined;
-  const statusText = statusMatch && statusMatch[2] ? String(statusMatch[2]).trim() : undefined;
-
-  const netErrMatch = text.match(/\b(net::ERR[^\s]+)\b/i);
-  const netError = netErrMatch ? String(netErrMatch[1]) : undefined;
-
-  const urlMatch = text.match(/\bhttps?:\/\/[^\s)]+/i);
-  const url = urlMatch ? String(urlMatch[0]) : undefined;
-
-  if (!url && typeof status !== 'number' && !netError) return undefined;
-  return { url, status, statusText, netError };
-};
-
-/**
- * 根据 message + errorType 给出较短的“原因分析”提示文案。
- */
-const guessCause = (message, errorType) => {
-  const text = String(message ?? '');
-  const type = String(errorType ?? '');
-
-  if (type === 'Promise错误') {
-    return 'Promise/异步错误：重点检查 async/await 调用链、catch 是否缺失、以及接口失败分支是否被吞掉（尤其是 then/catch 中解构/读属性）';
-  }
-  if (type === '资源加载错误') {
-    return '资源加载失败：检查静态资源路径、部署路径前缀（base/publicPath）、以及服务端是否返回 404/403；也可能是跨域/证书导致加载被阻止';
-  }
-  if (type === '网络请求错误') {
-    return '网络请求失败：检查请求 URL、跨域/CORS、代理配置、证书、DNS/断网；若是接口 4xx/5xx，优先看 Network 面板响应体与后端日志';
-  }
-  if (type === '语法错误') {
-    return '语法/解析异常：可能是构建产物损坏、返回内容不是 JS/JSON（例如接口返回 HTML）、或某段代码被错误注入导致解析失败';
-  }
-
-  const destructure = text.match(/Cannot destructure property '([^']+)' of '(?:([^']+))' as it is (undefined|null)/);
-  if (destructure) {
-    const prop = destructure[1];
-    const base = destructure[2];
-    return base
-      ? `解构赋值失败：对象 "${base}" 为 undefined/null，无法解构属性 "${prop}"（常见于接口字段缺失/异步未就绪/参数为 undefined）`
-      : `解构赋值失败：对象为 undefined/null，无法解构属性 "${prop}"（常见于接口字段缺失/异步未就绪/参数为 undefined）`;
-  }
-
-  const cannotRead = text.match(/Cannot read (?:properties|property) of (undefined|null)(?: \(reading '([^']+)'\))?/);
-  if (cannotRead) {
-    const base = cannotRead[1];
-    const prop = cannotRead[2];
-    return prop ? `某个对象为 ${base}，读取属性 "${prop}" 时抛错` : `某个对象为 ${base}，访问属性/方法时抛错`;
-  }
-  if (/is not a function/.test(text)) return '某个值并非函数却被调用，可能是导入错误/变量被覆盖/类型不符合预期';
-  if (/<path> attribute d: Expected number/.test(text))
-    return 'SVG path 的 d 属性出现非法数值（NaN/Infinity），通常是参与计算的坐标为 undefined/NaN（检查绘制/布局计算链路）';
-  if (/404 \(Not Found\)/.test(text) || /\b404\b/.test(text))
-    return '资源或接口返回 404：可能是路由/静态资源路径错误、服务未部署对应资源、或前端拼接 URL 错误';
-  if (/net::ERR/.test(text)) return '网络错误：请求被阻止/断网/DNS/证书/跨域等导致资源加载失败';
-  if (/Failed to fetch/.test(text)) return '网络请求失败，可能是跨域/URL 拼错/请求被拦截/离线';
-  if (/Unexpected token/.test(text)) return '解析异常（JSON/JS 语法），可能是返回内容不是预期格式或构建产物损坏';
-  if (/ResizeObserver loop limit exceeded/.test(text))
-    return '页面布局频繁变更导致 ResizeObserver 循环，通常与渲染/样式抖动有关';
-  return '通用运行时异常：优先查看第一条业务堆栈帧对应的变量/入参（可配合 断点调试 错误）';
-};
-
-/**
- * 单条日志分析：
- * - 提取主堆栈帧并拉取对应 dist 代码
- * - 用 AST + Prettier 定位/格式化函数片段，必要时回退到上下文窗口
- */
-const analyzeLog = async log => {
-  const primary = pickPrimaryFrame(log?.frames) ?? log?.location;
-  const occurredAt = typeof log?.occurredAt === 'string' ? log.occurredAt : undefined;
-  const message = log?.message;
-  const errorType = classifyErrorType(log);
-  const resource = errorType === '资源加载错误' ? parseResourceLoadError(message) : undefined;
-
-  const analysis = {
-    occurredAt,
-    message,
-    errorType,
-    resource,
-    primaryFrame: primary,
-    generated: undefined,
-    cause: guessCause(message, errorType),
-  };
-
-  if (!primary?.url || typeof primary?.line !== 'number') {
-    return analysis;
-  }
-
-  const url = primary.url;
-  const line = primary.line;
-  const column = typeof primary.column === 'number' ? primary.column : 0;
-  const functionName = typeof primary.functionName === 'string' ? primary.functionName : undefined;
-
-  const generatedRes = await fetch(url);
-  if (!generatedRes.ok) {
-    return analysis;
-  }
-  const generatedCode = await generatedRes.text();
-  analysis.generated = {
-    url,
-    line,
-    column,
-    context: await extractDistContext(generatedCode, line, column, functionName),
-  };
-
-  return analysis;
-};
-
-/**
  * Popup 主界面：日志列表 + dist 分析 + 断点调试入口。
  */
 const Popup = () => {
-  const [tabId, setTabId] = useState();
-  const [recording, setRecording] = useState(false);
-  const [logs, setLogs] = useState([]);
-  const [snapshots, setSnapshots] = useState([]);
+  const { tabId, recording, logs, snapshots, logsRef, refresh } = usePopupRecorder();
   const [selectedLogId, setSelectedLogId] = useState();
   const [analysis, setAnalysis] = useState();
   const [busy, setBusy] = useState(false);
@@ -229,11 +62,74 @@ const Popup = () => {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState();
   const [aiResult, setAiResult] = useState();
-  const logsRef = useRef([]);
+  const [aiMode, setAiMode] = useState('single');
+  const [aiSessionId, setAiSessionId] = useState('');
+  const [aiSessionLogId, setAiSessionLogId] = useState('');
+  const [aiUserAction, setAiUserAction] = useState('');
+  const [aiBaseline, setAiBaseline] = useState();
+  const [aiReproState, setAiReproState] = useState('idle');
   const analyzeTokenRef = useRef(0);
 
   const selectedLog = useMemo(() => logs.find(l => l.id === selectedLogId), [logs, selectedLogId]);
   const locked = recording;
+  const aiDisabled = aiBusy || (locked && aiMode !== 'agent') || !String(qwenKey ?? '').trim();
+  const hasNewEvidence = useMemo(() => {
+    if (aiMode !== 'agent') return false;
+    if (!aiBaseline) return false;
+    if (!selectedLog) return false;
+
+    const target = getIssuePrimaryLocation(selectedLog, analysis);
+    const newLogCount = Math.max(0, logs.length - (aiBaseline.logsLen || 0));
+    const newSnapshotCount = Math.max(0, snapshots.length - (aiBaseline.snapshotsLen || 0));
+
+    const newLogs = newLogCount > 0 ? logs.slice(0, newLogCount) : [];
+    const newSnapshots = newSnapshotCount > 0 ? snapshots.slice(0, newSnapshotCount) : [];
+
+    if (!target) return newLogs.length > 0 || newSnapshots.length > 0;
+    if (newLogs.some(l => isIssueRelatedLog(l, selectedLog, analysis))) return true;
+    if (newSnapshots.some(s => isIssueRelatedSnapshot(s, selectedLog, analysis))) return true;
+    return false;
+  }, [aiMode, aiBaseline, logs, snapshots, selectedLog, analysis]);
+
+  useEffect(() => {
+    if (aiMode !== 'agent') return;
+    if (!aiSessionId) return;
+    if (aiReproState !== 'waiting') return;
+    if (!recording) return;
+    if (aiBusy) return;
+    if (!hasNewEvidence) return;
+
+    setAiReproState('continuing');
+    void (async () => {
+      try {
+        await sendRuntimeMessage({ type: 'AGENT_RECORDER_STOP', tabId });
+        await refresh(tabId);
+      } catch {
+        void 0;
+      }
+      await onAiAnalyze();
+      setAiReproState('idle');
+    })();
+  }, [aiMode, aiSessionId, aiReproState, recording, aiBusy, hasNewEvidence, tabId]);
+
+  useEffect(() => {
+    setAiSessionId('');
+    setAiSessionLogId('');
+    setAiUserAction('');
+    setAiBaseline(undefined);
+    setAiReproState('idle');
+    setAiResult(undefined);
+  }, [selectedLogId]);
+
+  useEffect(() => {
+    if (aiMode !== 'agent') {
+      setAiSessionId('');
+      setAiSessionLogId('');
+      setAiUserAction('');
+      setAiBaseline(undefined);
+      setAiReproState('idle');
+    }
+  }, [aiMode]);
 
   useEffect(() => {
     try {
@@ -247,56 +143,6 @@ const Popup = () => {
   }, []);
 
   /**
-   * 同步 popup 展示数据：录制状态、日志列表、快照列表。
-   */
-  const refresh = async activeTabId => {
-    if (!activeTabId) return;
-    const status = await sendMessage({ type: 'AGENT_RECORDER_STATUS', tabId: activeTabId });
-    if (status?.ok) setRecording(Boolean(status.recording));
-
-    const result = await sendMessage({ type: 'AGENT_LOGS_GET', tabId: activeTabId });
-    if (result?.ok && Array.isArray(result.items)) {
-      logsRef.current = result.items;
-      setLogs(result.items);
-    }
-
-    const snapshotsResult = await sendMessage({ type: 'AGENT_SNAPSHOTS_GET', tabId: activeTabId });
-    if (snapshotsResult?.ok && Array.isArray(snapshotsResult.items)) {
-      setSnapshots(snapshotsResult.items);
-    }
-  };
-
-  useEffect(() => {
-    void (async () => {
-      const activeTabId = await getActiveTabId();
-      setTabId(activeTabId);
-      await refresh(activeTabId);
-    })();
-
-    const onMessage = msg => {
-      if (!msg || typeof msg !== 'object') return;
-      if (typeof msg.tabId !== 'number') return;
-      if (msg.tabId !== tabId) return;
-      if (msg.type !== 'AGENT_LOGS_UPDATED' && msg.type !== 'AGENT_SNAPSHOTS_UPDATED') return;
-      void refresh(msg.tabId);
-    };
-
-    try {
-      chrome.runtime.onMessage.addListener(onMessage);
-    } catch {
-      void 0;
-    }
-
-    return () => {
-      try {
-        chrome.runtime.onMessage.removeListener(onMessage);
-      } catch {
-        void 0;
-      }
-    };
-  }, [tabId]);
-
-  /**
    * 开始录制（注入/开启前端采集）。
    */
   const onStart = async () => {
@@ -305,7 +151,7 @@ const Popup = () => {
     if (!tabId) return setUiError('未找到当前激活标签页');
     setBusy(true);
     try {
-      const result = await sendMessage({ type: 'AGENT_RECORDER_START', tabId });
+      const result = await sendRuntimeMessage({ type: 'AGENT_RECORDER_START', tabId });
       if (!result?.ok) throw new Error(result?.error ?? 'start_failed');
       await refresh(tabId);
     } catch (e) {
@@ -324,7 +170,7 @@ const Popup = () => {
     if (!tabId) return setUiError('未找到当前激活标签页');
     setBusy(true);
     try {
-      const result = await sendMessage({ type: 'AGENT_RECORDER_STOP', tabId });
+      const result = await sendRuntimeMessage({ type: 'AGENT_RECORDER_STOP', tabId });
       if (!result?.ok) throw new Error(result?.error ?? 'stop_failed');
       await refresh(tabId);
     } catch (e) {
@@ -344,10 +190,9 @@ const Popup = () => {
     if (!tabId) return setUiError('未找到当前激活标签页');
     setBusy(true);
     try {
-      const result = await sendMessage({ type: 'AGENT_LOGS_CLEAR', tabId });
+      const result = await sendRuntimeMessage({ type: 'AGENT_LOGS_CLEAR', tabId });
       if (!result?.ok) throw new Error(result?.error ?? 'clear_failed');
-      setLogs([]);
-      logsRef.current = [];
+      await refresh(tabId);
       setSelectedLogId(undefined);
       setAnalysis(undefined);
     } catch (e) {
@@ -400,22 +245,33 @@ const Popup = () => {
    * 触发 AI 诊断：把（错误日志 + dist 片段）发给 background，由 service worker 调用大模型。
    */
   const onAiAnalyze = async () => {
-    if (locked) return;
+    if (locked && aiMode !== 'agent') return;
     setAiError(undefined);
     setAiResult(undefined);
+    setAiUserAction('');
     if (!selectedLog) return setAiError('未选择日志');
     if (!analysis) return setAiError('请先完成 dist 分析');
     const apiKey = String(qwenKey ?? '').trim();
     if (!apiKey) return setAiError('请先填写 Qwen Key');
+    if (aiMode === 'agent' && !tabId) return setAiError('未找到当前激活标签页');
 
     const distText = analysis?.generated?.context?.text ? String(analysis.generated.context.text) : '';
     const formatted = formatConsoleLikeError(selectedLog);
 
     setAiBusy(true);
     try {
-      const resp = await sendMessage({
-        type: 'AGENT_AI_ANALYZE',
+      const currentIssueLogId = selectedLogId || selectedLog.id;
+      const shouldUseSession =
+        aiMode === 'agent' && aiSessionId && aiSessionLogId && aiSessionLogId === currentIssueLogId;
+      const resp = await sendRuntimeMessage({
+        type: aiMode === 'agent' ? 'AGENT_AI_AGENT_LOOP' : 'AGENT_AI_ANALYZE',
         apiKey,
+        ...(aiMode === 'agent' ? { tabId } : {}),
+        ...(aiMode === 'agent' ? { selectedLogId: currentIssueLogId } : {}),
+        ...(shouldUseSession ? { sessionId: aiSessionId } : {}),
+        ...(aiMode === 'agent'
+          ? { objective: '严格仅分析当前选中问题；必要时通过强相关证据闭环采证，并给出可落地的修复建议。' }
+          : {}),
         error: {
           occurredAt: selectedLog.occurredAt,
           message: String(selectedLog.message ?? ''),
@@ -427,11 +283,33 @@ const Popup = () => {
           guessedCause: analysis.cause,
           primaryFrame: analysis.primaryFrame,
         },
+        ...(aiMode === 'agent' ? { options: { maxSteps: 6 } } : {}),
       });
       if (!resp?.ok) throw new Error(resp?.error ?? 'ai_analyze_failed');
+      if (aiMode === 'agent' && resp?.status === 'waiting') {
+        const nextSessionId = typeof resp.sessionId === 'string' ? resp.sessionId : aiSessionId;
+        setAiSessionId(nextSessionId);
+        setAiSessionLogId(currentIssueLogId);
+        setAiUserAction(typeof resp.userAction === 'string' ? resp.userAction : '');
+        setAiReproState('waiting');
+      } else if (aiMode === 'agent') {
+        setAiSessionId('');
+        setAiSessionLogId('');
+        setAiUserAction('');
+        setAiBaseline(undefined);
+        setAiReproState('idle');
+      }
+
       setAiResult({
+        status: typeof resp.status === 'string' ? resp.status : undefined,
         cause: typeof resp.cause === 'string' ? resp.cause : '',
-        suggestion: typeof resp.suggestion === 'string' ? resp.suggestion : '',
+        suggestion: Array.isArray(resp.suggestion)
+          ? resp.suggestion
+          : typeof resp.suggestion === 'string'
+            ? [resp.suggestion]
+            : [],
+        evidence: Array.isArray(resp.evidence) ? resp.evidence : [],
+        actionsTaken: Array.isArray(resp.actionsTaken) ? resp.actionsTaken : [],
       });
     } catch (e) {
       setAiError(formatAiErrorMessage(e));
@@ -452,7 +330,7 @@ const Popup = () => {
     if (!primary?.url || typeof primary?.line !== 'number') return setUiError('该条日志缺少 url/line，无法设置断点');
     setBusy(true);
     try {
-      const result = await sendMessage({
+      const result = await sendRuntimeMessage({
         type: 'AGENT_BREAKPOINT_ARM',
         tabId,
         url: primary.url,
@@ -541,200 +419,51 @@ const Popup = () => {
         <div className="mt-2 rounded bg-indigo-50 px-2 py-1 text-left text-xs text-indigo-700">{uiNotice}</div>
       ) : null}
 
-      <div className="log-container mt-2">
-        {logs.length === 0 ? (
-          <div className="p-2 text-left text-xs text-slate-500">
-            暂无日志。点击 Start 后，在当前页面触发 console.error 或异常。
-          </div>
-        ) : (
-          logs.map(item => {
-            const isSelected = item.id === selectedLogId;
-            const messageText = String(item.message ?? '');
-            const primary = pickPrimaryFrame(item?.frames) ?? item?.location;
-            const loc = item.location;
-            const locText =
-              loc && typeof loc.url === 'string'
-                ? `${loc.url.split('/').slice(-1)[0]}:${loc.line ?? '-'}:${loc.column ?? '-'}`
-                : '';
-            const level = item.level ?? item.kind ?? 'log';
-            const canArmBreakpoint = Boolean(primary?.url && typeof primary?.line === 'number');
-            return (
-              <div
-                key={item.id}
-                className={cn('log-item', isSelected && 'log-item--selected')}
-                onClick={() => {
-                  if (busy || locked) return;
-                  setSelectedLogId(item.id);
-                  void onAnalyze(item);
-                }}
-                onKeyDown={e => {
-                  if (e.key !== 'Enter' && e.key !== ' ') return;
-                  e.preventDefault();
-                  if (busy || locked) return;
-                  setSelectedLogId(item.id);
-                  void onAnalyze(item);
-                }}
-                role="button"
-                tabIndex={0}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className={cn('log-badge', level === 'error' ? 'log-badge--error' : 'log-badge--info')}>
-                        {String(level)}
-                      </span>
-                      <span className="truncate text-xs font-medium">{messageText}</span>
-                    </div>
-                    <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
-                      <span className="shrink-0">{formatLocalTime(item.occurredAt) || '-'}</span>
-                      <span className="truncate">{locText}</span>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 flex-col gap-1">
-                    {canArmBreakpoint ? (
-                      <button
-                        className="rounded bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white"
-                        onClick={e => {
-                          e.stopPropagation();
-                          if (busy || locked) return;
-                          setSelectedLogId(item.id);
-                          void onArmBreakpoint(item);
-                        }}
-                        disabled={busy || locked}
-                        type="button">
-                        断点调试
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
+      <LogList
+        logs={logs}
+        selectedLogId={selectedLogId}
+        busy={busy}
+        locked={locked}
+        onSelectLog={log => {
+          setSelectedLogId(log.id);
+          void onAnalyze(log);
+        }}
+        onArmBreakpoint={log => {
+          setSelectedLogId(log.id);
+          void onArmBreakpoint(log);
+        }}
+      />
 
-      <div className="analysis-container mt-2">
-        {!analysis ? (
-          selectedLog ? (
-            <div className="rounded bg-white p-2 text-left text-xs text-slate-500">
-              点击一条日志自动进行 dist 片段定位；或点击 断点调试，在页面重现后调试错误。
-            </div>
-          ) : (
-            <div className="rounded bg-white p-2 text-left text-xs text-slate-500">点击一条日志查看分析结果。</div>
-          )
-        ) : (
-          <div className="rounded bg-white p-2 text-left">
-            {analysis ? (
-              <>
-                {selectedLog ? (
-                  <>
-                    <div className="text-xs font-semibold">错误日志</div>
-                    <pre className="analysis-pre mt-1" style={{ maxHeight: '146px' }}>
-                      {formatConsoleLikeError(selectedLog)}
-                    </pre>
-                  </>
-                ) : null}
-
-                <div className="mt-2 text-xs font-semibold">dist 分析</div>
-                <div className="mt-1 text-[12px] text-slate-700">错误类型：{analysis.errorType}</div>
-                {analysis.errorType === '资源加载错误' && analysis.resource ? (
-                  <div className="text-[12px] text-slate-700">
-                    {analysis.resource.url ? (
-                      <div className="mt-1 break-all">资源 URL：{analysis.resource.url}</div>
-                    ) : null}
-                    {typeof analysis.resource.status === 'number' ? (
-                      <div className="mt-1">
-                        状态码：{analysis.resource.status}
-                        {analysis.resource.statusText ? ` (${analysis.resource.statusText})` : ''}
-                      </div>
-                    ) : null}
-                    {analysis.resource.netError ? (
-                      <div className="mt-1">网络错误：{analysis.resource.netError}</div>
-                    ) : null}
-                  </div>
-                ) : null}
-                <div className="mt-1 text-[12px] text-slate-700">原因分析：{analysis.cause}</div>
-                {analysis.generated?.url ? (
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-slate-700">
-                    <span className="break-all">
-                      产物位置：{analysis.generated.url}:{analysis.generated.line}:{analysis.generated.column ?? 0}
-                    </span>
-                  </div>
-                ) : null}
-
-                {analysis.generated?.context?.text ? (
-                  <>
-                    <div className="mt-2 text-xs font-semibold">dist 片段</div>
-                    {analysis.generated.context.kind === 'function' ? (
-                      <CodeSnippet
-                        text={analysis.generated.context.text}
-                        highlight={analysis.generated.context.highlight}
-                      />
-                    ) : (
-                      <pre className="analysis-pre mt-1">{analysis.generated.context.text}</pre>
-                    )}
-                  </>
-                ) : null}
-
-                <div className="mt-2 text-xs font-semibold">AI 分析</div>
-                <div className="mt-1 grid gap-2">
-                  <div className="grid gap-1">
-                    <div className="text-[12px] text-slate-700">Qwen Key</div>
-                    <input
-                      className="w-full rounded border border-slate-200 bg-white px-2 py-1 text-[12px] text-slate-900"
-                      value={qwenKey}
-                      onChange={e => {
-                        const v = e.target.value;
-                        setQwenKey(v);
-                        try {
-                          chrome.storage?.local?.set?.({ [STORAGE_QWEN_KEY]: v });
-                        } catch {
-                          void 0;
-                        }
-                      }}
-                      placeholder="请输入可用的Qwen Key"
-                      type="textarea"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="rounded bg-emerald-600 px-2 py-1 text-[11px] font-medium text-white"
-                      onClick={onAiAnalyze}
-                      disabled={aiBusy || locked || !String(qwenKey ?? '').trim()}
-                      type="button">
-                      {aiBusy ? '分析中...' : 'AI 诊断'}
-                    </button>
-                    <div className="text-[11px] text-slate-500">
-                      {analysis.generated?.context?.text
-                        ? '基于 dist 片段 + 错误日志'
-                        : '未找到 dist 片段，将仅基于错误日志'}
-                    </div>
-                  </div>
-
-                  {aiError ? (
-                    <div className="whitespace-pre-wrap break-words rounded bg-red-50 px-2 py-1 text-left text-xs text-red-700">
-                      {aiError}
-                    </div>
-                  ) : null}
-
-                  {aiResult ? (
-                    <div className="grid gap-2">
-                      <div>
-                        <div className="text-[12px] font-semibold text-slate-900">错误原因</div>
-                        <pre className="analysis-pre analysis-pre--wrap mt-1">{aiResult.cause || '-'}</pre>
-                      </div>
-                      <div>
-                        <div className="text-[12px] font-semibold text-slate-900">修改建议</div>
-                        <pre className="analysis-pre analysis-pre--wrap mt-1">{aiResult.suggestion || '-'}</pre>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </>
-            ) : null}
-          </div>
-        )}
-      </div>
+      <AnalysisPanel
+        selectedLog={selectedLog}
+        analysis={analysis}
+        qwenKey={qwenKey}
+        onChangeKey={v => {
+          setQwenKey(v);
+          try {
+            chrome.storage?.local?.set?.({ [STORAGE_QWEN_KEY]: v });
+          } catch {
+            void 0;
+          }
+        }}
+        aiMode={aiMode}
+        setAiMode={setAiMode}
+        aiBusy={aiBusy}
+        aiDisabled={aiDisabled}
+        onAiAnalyze={onAiAnalyze}
+        aiSessionId={aiSessionId}
+        aiUserAction={aiUserAction}
+        aiReproState={aiReproState}
+        recording={recording}
+        busy={busy}
+        onAgentStartWait={async () => {
+          setAiReproState('waiting');
+          setAiBaseline({ logsLen: logs.length, snapshotsLen: snapshots.length });
+          await onStart();
+        }}
+        aiError={aiError}
+        aiResult={aiResult}
+      />
     </div>
   );
 };

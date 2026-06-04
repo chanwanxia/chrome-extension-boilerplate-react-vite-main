@@ -26,6 +26,39 @@ export async function handlePopupMessage(msg, actions) {
     return actions.aiAnalyze({ apiKey, error, distText, meta });
   }
 
+  if (type === MESSAGE_TYPES.aiAgentLoop) {
+    const apiKey = typeof msg?.apiKey === 'string' ? msg.apiKey.trim() : '';
+    if (!apiKey) return { ok: false, error: 'missing_apiKey' };
+
+    const tabId = parseTabId(msg);
+    if (tabId === null) return { ok: false, error: 'invalid_tabId' };
+
+    const sessionId = typeof msg?.sessionId === 'string' ? msg.sessionId.trim() : '';
+    const selectedLogId = typeof msg?.selectedLogId === 'string' ? msg.selectedLogId.trim() : '';
+    if (!sessionId && !selectedLogId) return { ok: false, error: 'missing_selectedLogId' };
+
+    const objective = typeof msg?.objective === 'string' ? msg.objective.trim() : '';
+    const error = msg?.error && typeof msg.error === 'object' ? msg.error : {};
+    const distText = typeof msg?.distText === 'string' ? msg.distText : '';
+    const meta = msg?.meta && typeof msg.meta === 'object' ? msg.meta : {};
+
+    const options = msg?.options && typeof msg.options === 'object' ? msg.options : {};
+    const maxSteps = Number(options?.maxSteps);
+
+    if (typeof actions?.aiAgentLoop !== 'function') return { ok: false, error: 'ai_agent_not_supported' };
+    return actions.aiAgentLoop({
+      apiKey,
+      tabId,
+      sessionId: sessionId || undefined,
+      selectedLogId: selectedLogId || undefined,
+      objective,
+      error,
+      distText,
+      meta,
+      options: { maxSteps },
+    });
+  }
+
   if (type === MESSAGE_TYPES.recorderStart) {
     const tabId = parseTabId(msg);
     if (tabId === null) return { ok: false, error: 'invalid_tabId' };

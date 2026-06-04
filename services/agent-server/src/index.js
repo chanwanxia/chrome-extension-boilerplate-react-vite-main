@@ -12,6 +12,11 @@ const corsHeaders = {
   'access-control-allow-headers': 'content-type,authorization',
 };
 
+/**
+ * 读取并解析 JSON 请求体。
+ * - 超过 maxBytes 会抛出 payload_too_large
+ * - 空 body 返回 null
+ */
 const readJsonBody = async (req, maxBytes = 1_000_000) => {
   const chunks = [];
   let total = 0;
@@ -30,6 +35,9 @@ const readJsonBody = async (req, maxBytes = 1_000_000) => {
   return JSON.parse(text);
 };
 
+/**
+ * 以 JSON 响应体返回，并补齐 CORS 与 content-length。
+ */
 const sendJson = (res, response) => {
   const payload = JSON.stringify(response.body);
   res.writeHead(response.status, {
@@ -40,15 +48,27 @@ const sendJson = (res, response) => {
   res.end(payload);
 };
 
+/**
+ * 404 响应构造器。
+ */
 const notFound = () => ({ status: 404, body: { error: 'not_found' } });
 
+/**
+ * 400 响应构造器。
+ */
 const badRequest = message => ({
   status: 400,
   body: { error: 'bad_request', message },
 });
 
+/**
+ * 获取当前时间的 ISO 字符串。
+ */
 const nowIso = () => new Date().toISOString();
 
+/**
+ * 写入一条错误事件，并返回事件 id。
+ */
 const handleCreateEvent = body => {
   if (!isCreateErrorEventRequest(body)) return badRequest('invalid_event_payload');
 
@@ -77,6 +97,11 @@ const handleCreateEvent = body => {
   return { status: 200, body: { id } };
 };
 
+/**
+ * 创建一个任务条目。
+ * - analyze-error：当前为同步产出静态 nextSteps（可扩展为异步/LLM 调度）
+ * - 其他 kind：进入 queued
+ */
 const handleCreateTask = body => {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return badRequest('invalid_task_payload');
   const req = body;
@@ -122,6 +147,9 @@ const handleCreateTask = body => {
   return { status: 200, body: { id } };
 };
 
+/**
+ * 简单路由：health/events/tasks 的 CRUD（内存存储）。
+ */
 const router = async req => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const method = req.method ?? 'GET';
@@ -173,6 +201,9 @@ const router = async req => {
 
 const port = Number(process.env.PORT ?? 8787);
 
+/**
+ * HTTP 服务：支持 CORS 预检，所有 API 统一返回 JSON。
+ */
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, corsHeaders);
@@ -184,6 +215,9 @@ const server = http.createServer(async (req, res) => {
   sendJson(res, response);
 });
 
+/**
+ * 启动监听。
+ */
 server.listen(port, () => {
   process.stdout.write(`agent-server listening on http://localhost:${port}\n`);
 });
