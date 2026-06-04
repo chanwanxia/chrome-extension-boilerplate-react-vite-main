@@ -1,275 +1,174 @@
-<div align="center">
-
-<picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/99cb6303-64e4-4bed-bf3f-35735353e6de" />
-    <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/a5dbf71c-c509-4c4f-80f4-be88a1943b0a" />
-    <img alt="Logo" src="https://github.com/user-attachments/assets/99cb6303-64e4-4bed-bf3f-35735353e6de" />
-</picture>
-
-![](https://img.shields.io/badge/React-61DAFB?style=flat-square&logo=react&logoColor=black)
-![](https://img.shields.io/badge/Typescript-3178C6?style=flat-square&logo=typescript&logoColor=white)
-![](https://badges.aleen42.com/src/vitejs.svg)
-
-![GitHub action badge](https://github.com/Jonghakseo/chrome-extension-boilerplate-react-vite/actions/workflows/build-zip.yml/badge.svg)
-![GitHub action badge](https://github.com/Jonghakseo/chrome-extension-boilerplate-react-vite/actions/workflows/lint.yml/badge.svg)
-
-<a href="https://discord.gg/4ERQ6jgV9a" target="_blank"><img src="https://discord.com/api/guilds/1263404974830915637/widget.png"/></a>
-
-> This boilerplate
-> has [Legacy version](https://github.com/Jonghakseo/chrome-extension-boilerplate-react-vite/tree/legacy)
-
-</div>
-
-> [!NOTE]
-> This project is listed in the [Awesome Vite](https://github.com/vitejs/awesome-vite)
-
-> [!TIP]
-> Share storage state between all pages
->
-> https://github.com/user-attachments/assets/3b8e189f-6443-490e-a455-4f9570267f8c
-
-## Table of Contents
-
-- [Intro](#intro)
-- [Features](#features)
-- [Structure](#structure)
-    - [ChromeExtension](#structure-chrome-extension)
-    - [Packages](#structure-packages)
-    - [Pages](#structure-pages)
-- [Installation](#installation)
-    - [Chrome](#installation-chrome)
-    - [Firefox](#installation-firefox)
-- [Install dependency](#install-dependency)
-    - [For root](#install-dependency-for-root)
-    - [For module](#install-dependency-for-module)
-- [Environment variables](#env-variables)
-    - [Add new](#env-variables-new)
-    - [Set via CLI](#env-variables-cli-set)
-- [Troubleshooting](#troubleshooting)
-    - [Hot module reload seems to have frozen](#hot-module-reload-seems-to-have-frozen)
-    - [Imports not resolving correctly](#imports-not-resolving-correctly)
-- [Community](#community)
-- [Debugging](#debugging)
-- [Reference](#reference)
-- [Star History](#star-history)
-- [Contributors](#contributors)
-
-## Intro
-
-This boilerplate helps you create Chrome/Firefox extensions using React and Typescript. It improves
-the build speed and development experience by using Vite and Turborepo.
-
-## Features
-
-- [React](https://reactjs.org/)
-- [TypeScript](https://www.typescriptlang.org/)
-- [Tailwindcss](https://tailwindcss.com/)
-- [Vite](https://vitejs.dev/) with [Rollup](https://rollupjs.org/)
-- [Turborepo](https://turbo.build/repo)
-- [Prettier](https://prettier.io/)
-- [ESLint](https://eslint.org/)
-- [Chrome Extensions Manifest Version 3](https://developer.chrome.com/docs/extensions/mv3/intro/)
-- [Custom i18n package](/packages/i18n/)
-- [Custom HMR (Hot Module Rebuild) plugin](/packages/hmr)
-- [End-to-end testing with WebdriverIO](https://webdriver.io/)
-
-## Installation
-
-1. Clone this repository.( ```git clone https://github.com/Jonghakseo/chrome-extension-boilerplate-react-vite``` )
-2. Ensure your node version is >= than in `.nvmrc` file, recommend to use [nvm](https://github.com/nvm-sh/nvm?tab=readme-ov-file#intro)
-3. Edit `/packages/i18n/locales/`{your locale(s)}/`messages.json`
-4. In the objects `extensionDescription` and `extensionName`, change the `message` fields (leave `description` alone)
-5. Install pnpm globally: `npm install -g pnpm`
-6. Run `pnpm install`
-7. Check if you have that configuration in your IDE/Editor:
-    - <b>VS Code</b>:
-        - Installed [ESLint extension](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint)
-        - Installed [Prettier extension](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
-        - Enabled `Typescript Workbench version` in settings:
-            - CTRL + SHIFT + P -> Search: `Typescript: Select Typescript version...` -> `Use Workbench version`
-            - [Read more](https://code.visualstudio.com/docs/languages/typescript#_using-newer-typescript-versions)
-        - Optional, for imports to work correctly in WSL, you might need to install the [Remote - WSL](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-wsl) extension and connect to WSL remotely from VS Code. See overview section in the extension page for more information.
-    - <b>WebStorm</b>:
-      - Configured [ESLint](https://www.jetbrains.com/help/webstorm/eslint.html#ws_eslint_configure_run_eslint_on_save)
-      - Configured [Prettier](https://prettier.io/docs/en/webstorm.html)
-      - Optional, but useful `File | Settings | Tools | Actions on Save`\
-      -> `Optimize imports` and `Reformat code`
-8. Run `pnpm update-version <version>` for change the `version` to the desired version of your extension.
-
-> [!IMPORTANT]
-> On Windows, make sure you have WSL enabled and Linux distribution (e.g. Ubuntu) installed on WSL.
-> 
-> [Installation Guide](https://learn.microsoft.com/en-us/windows/wsl/install)
+# Debug Agent 浏览器扩展（MV3）
 
-<b>Then, depending on the target browser:</b>
+面向“线上项目无 source-map 的前端异常定位”场景的浏览器扩展：通过 `chrome.debugger`（Chrome DevTools Protocol）+ 页面注入 hooks，在不改业务代码的前提下尽可能完整地采集异常，并提供：
 
-### For Chrome: <a name="installation-chrome"></a>
+- 录制：采集控制台错误、未捕获异常、Promise 拒绝、资源加载失败、网络请求失败等
+- dist 定位：从堆栈帧定位到 `chunkUrl:line:column`，拉取并展示对应构建产物片段
+- 断点与快照：对指定位置自动下断点，暂停后抓取 callFrames / scope / this / Vue2 线索等运行时快照
+- AI 辅助：可选调用 Qwen（DashScope OpenAI Compatible）生成原因与修复建议（需要 API Key）
 
-1. Run:
-    - Dev: `pnpm dev` (on Windows, you should run as administrator;
-      see [issue#456](https://github.com/Jonghakseo/chrome-extension-boilerplate-react-vite/issues/456))
-    - Prod: `pnpm build`
-2. Open in browser - `chrome://extensions`
-3. Check - <kbd>Developer mode</kbd>
-4. Click - <kbd>Load unpacked</kbd> in the upper left corner
-5. Select the `dist` directory from the boilerplate project
+## 目录
 
-### For Firefox: <a name="installation-firefox"></a>
+- [快速开始](#快速开始)
+- [如何使用](#如何使用)
+- [项目结构](#项目结构)
+- [常用命令](#常用命令)
+- [环境变量](#环境变量)
+- [能力与限制](#能力与限制)
+- [排错](#排错)
 
-1. Run:
-    - Dev: `pnpm dev:firefox`
-    - Prod: `pnpm build:firefox`
-2. Open in browser - `about:debugging#/runtime/this-firefox`
-3. Click - <kbd>Load Temporary Add-on...</kbd> in the upper right corner
-4. Select the `./dist/manifest.json` file from the boilerplate project
+## 快速开始
 
-> [!NOTE]
-> In Firefox, you load add-ons in temporary mode. That means they'll disappear after each browser close. You have to
-> load the add-on on every browser launch.
+### 依赖要求
 
-## Install dependency for turborepo: <a name="install-dependency"></a>
+- Node.js：`>= 22.15.1`（见根目录 `package.json#engines`）
+- pnpm：`pnpm@10`（建议全局安装：`npm i -g pnpm`）
 
-### For root: <a name="install-dependency-for-root"></a>
+安装依赖（首次会自动把 `.example.env` 复制为 `.env`）：
 
-1. Run `pnpm i <package> -w`
+```bash
+pnpm install
+```
 
-### For module: <a name="install-dependency-for-module"></a>
+### Chrome（开发）
 
-1. Run `pnpm i <package> -F <module name>`
+1. 启动开发构建（会 watch 并把产物输出到根目录 `dist/`）：
 
-`package` - Name of the package you want to install e.g. `nodemon` \
-`module-name` - You can find it inside each `package.json` under the key `name`, e.g. `@extension/content-script`, you
-can use only `content-script` without `@extension/` prefix
+```bash
+pnpm dev
+```
 
-## How do I disable modules I'm not using?
+2. 打开 `chrome://extensions`，开启“开发者模式”
+3. 点击“加载已解压的扩展程序”，选择本项目的 `dist/` 目录
 
-[Read here](packages/module-manager/README.md)
+### Chrome（生产构建 / 打包）
 
-## Environment variables
+```bash
+pnpm build
+pnpm zip
+```
 
-Read: [Env Documentation](packages/env/README.md)
+`pnpm zip` 会把 `dist/` 打包到 `dist-zip/extension-*.zip`（用于分发或 e2e）。
 
-## Boilerplate structure <a name="structure"></a>
+### Firefox（开发 / 构建）
 
-### Chrome extension <a name="structure-chrome-extension"></a>
+```bash
+pnpm dev:firefox
+pnpm build:firefox
+```
 
-The extension lives in the `chrome-extension` directory and includes the following files:
+- 打开 `about:debugging#/runtime/this-firefox`
+- 选择 “Load Temporary Add-on...”
+- 选择 `./dist/manifest.json`
 
-- [`manifest.ts`](chrome-extension/manifest.ts) - script that outputs the `manifest.json`
-- [`src/background`](chrome-extension/src/background) - [background script](https://developer.chrome.com/docs/extensions/mv3/background_pages/)
-  (`background.service_worker` in manifest.json)
-- [`public`](chrome-extension/public/) - icons referenced in the manifest; content CSS for user's page injection
+## 如何使用
 
-> [!IMPORTANT]
-> To facilitate development, the boilerplate is configured to "Read and change all your data on all websites".
-> In production, it's best practice to limit the premissions to only the strictly necessary websites. See
-> [Declaring permissions](https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions)
-> and edit `manifest.js` accordingly.
+1. 打开你要排查的网页
+2. 点击扩展图标打开 Popup（入口：`pages/popup`）
+3. 点击 Start/开始录制（会 attach debugger 并启用 Runtime/Log/Network，同时注入页面 hooks）
+4. 在页面上复现问题
+5. 在 Popup 的日志列表中选择一条错误：
+   - Analyze：拉取该堆栈定位到的 dist 文件片段，并给出初步分类与排查建议
+   - Arm BP：按 `url + line(+column)` 自动设置断点；回到页面再次复现后会暂停
+6. 页面暂停后，Popup 会出现运行时快照（Debugger.paused）：
+   - 可查看截断后的局部变量、this 预览、Vue2 线索（若可推断）
+   - 点击 Resume 继续执行
+7. 需要 AI 辅助时：在 Popup 下方填写 Qwen/DashScope API Key，点击 AI Analyze
 
-### Pages <a name="structure-pages"></a>
+## 项目结构
 
-Code that is transpiled to be part of the extension lives in the [pages](pages) directory.
+本仓库是一个 pnpm workspace + turborepo 的 monorepo，核心模块如下：
 
-- [`content`](pages/content) - Scripts injected into specified pages (You can see it in console)
-- [`content-ui`](pages/content-ui) - React Components injected into specified pages (You can see it at the very bottom of pages)
-- [`content-runtime`](pages/content-runtime/src/) - [injected content scripts](https://developer.chrome.com/docs/extensions/develop/concepts/content-scripts#functionality)
-  This can be injected from e.g. `popup` like standard `content`
-- [`devtools`](pages/devtools/) - [extend the browser DevTools](https://developer.chrome.com/docs/extensions/how-to/devtools/extend-devtools#creating)
-  (`devtools_page` in manifest.json)
-- [`devtools-panel`](pages/devtools-panel/) - [DevTools panel](https://developer.chrome.com/docs/extensions/reference/api/devtools/panels)
-  for [devtools](pages/devtools/src/index.ts)
-- [`new-tab`](pages/new-tab/) - [override the default New Tab page](https://developer.chrome.com/docs/extensions/develop/ui/override-chrome-pages)
-  (`chrome_url_overrides.newtab` in manifest.json)
-- [`options`](pages/options/) - [options page](https://developer.chrome.com/docs/extensions/develop/ui/options-page)
-  (`options_page` in manifest.json)
-- [`popup`](pages/popup/) - [popup](https://developer.chrome.com/docs/extensions/reference/api/action#popup) shown when
-  clicking the extension in the toolbar
-  (`action.default_popup` in manifest.json)
-- [`side-panel`](pages/side-panel/) - [sidepanel (Chrome 114+)](https://developer.chrome.com/docs/extensions/reference/api/sidePanel)
-  (`side_panel.default_path` in manifest.json)
+```
+.
+├─ chrome-extension/          # 扩展构建入口：生成 manifest + 构建 MV3 background
+│  ├─ manifest.js             # manifest 源（构建生成 dist/manifest.json）
+│  ├─ src/background/         # service worker（监听、录制、断点、快照、AI 调用）
+│  └─ vite.config.js
+├─ pages/
+│  └─ popup/                  # 扩展弹窗 UI（React + Tailwind）
+├─ packages/                  # 共享包（env/hmr/storage/shared/ui/vite-config 等）
+├─ services/
+│  └─ agent-server/           # 可选：简易事件/任务服务（HTTP，默认 8787）
+└─ tests/
+   └─ e2e/                    # e2e（基于打包后的扩展）
+```
 
-### Packages <a name="structure-packages"></a>
+## 常用命令
 
-Some shared packages:
+在仓库根目录执行：
 
-- `dev-utils` - utilities for Chrome extension development (manifest-parser, logger)
-- `env` - exports object which contain all environment variables from `.env` and dynamically declared
-- `hmr` - custom HMR plugin for Vite, injection script for reload/refresh, HMR dev-server
-- `i18n` - custom internationalization package; provides i18n function with type safety and other validation
-- `shared` - shared code for the entire project (types, constants, custom hooks, components etc.)
-- `storage` - helpers for easier integration with [storage](https://developer.chrome.com/docs/extensions/reference/api/storage), e.g. local/session storages
-- `tailwind-config` - shared Tailwind config for entire project
-- `tsconfig` - shared tsconfig for the entire project
-- `ui` - function to merge your Tailwind config with the global one; you can save components here
-- `vite-config` - shared Vite config for the entire project
+```bash
+pnpm dev               # 开发构建（watch），产物输出到 dist/
+pnpm build             # 生产构建
+pnpm zip               # build 后打 zip（dist-zip/）
+pnpm lint              # 全仓 lint
+pnpm format            # 全仓 prettier
+pnpm update-version 0.1.0   # 批量更新各包版本号
+```
 
-Other useful packages:
+只对某个 workspace 执行（示例）：
 
-- `zipper` - run `pnpm zip` to pack the `dist` folder into `extension-YYYYMMDD-HHmmss.zip` inside the newly created
-  `dist-zip`
-- `module-manager` - run `pnpm module-manager` to enable/disable modules
-- `e2e` - run `pnpm e2e` for end-to-end tests of your zipped extension on different browsers
+```bash
+pnpm -C chrome-extension lint
+pnpm -C pages/popup dev
+pnpm -C services/agent-server dev
+```
 
-## Troubleshooting
+安装依赖：
 
-### Hot module reload seems to have frozen
+```bash
+pnpm i <package> -w                 # 安装到根 workspace
+pnpm i <package> -F <workspaceName> # 安装到指定模块（见各自 package.json 的 name）
+```
 
-If saving source files doesn't cause the extension HMR code to trigger a reload of the browser page, try this:
+## 环境变量
 
-1. Ctrl+C the development server and restart it (`pnpm run dev`)
-2. If you get a [`grpc` error](https://github.com/Jonghakseo/chrome-extension-boilerplate-react-vite/issues/612),
-   [kill the
-   `turbo` process](https://github.com/Jonghakseo/chrome-extension-boilerplate-react-vite/issues/612#issuecomment-2518982339)
-   and run `pnpm dev` again.
+本项目使用 `packages/env` 将 `.env` 注入到构建（在 Vite 配置中通过 `define: { 'process.env': env }`）。
 
-### Imports not resolving correctly
+- `.env` 中可编辑的键必须以 `CEB_` 开头（示例见 `.example.env`）
+- 通过 CLI 注入的键必须以 `CLI_CEB_` 开头（由 `pnpm set-global-env ...` 写入 `.env` 的 CLI 区域）
+- 内置开关：
+  - `CLI_CEB_DEV`：是否开发模式（`pnpm dev` 会自动设置为 true）
+  - `CLI_CEB_FIREFOX`：是否 Firefox 构建（`pnpm dev:firefox / build:firefox` 会自动设置）
 
-If you are using WSL and imports are not resolving correctly, ensure that you have connected VS Code to WSL remotely using the [Remote - WSL](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-wsl) extension.
+更多细节见：`packages/env/README.md`。
 
-## Community
+## 能力与限制
 
-To chat with other community members, you can join the [Discord](https://discord.gg/4ERQ6jgV9a) server.
-You can ask questions on that server, and you can also help others.
+### 能捕获的（高覆盖）
 
-Also, suggest new features or share any challenges you've faced while developing Chrome extensions!
+- JS 运行时未捕获异常（CDP `Runtime.exceptionThrown`）
+- Promise 未处理拒绝（注入 `unhandledrejection`）
+- 控制台错误（CDP `Runtime.consoleAPICalled`，主要关注 `console.error`）
+- 资源加载失败（注入捕获 `error` 事件：script/css/img 等）
+- 网络请求失败/慢请求线索（Network 域 + fetch/XHR hooks）
+- Vue2 场景：可尝试通过运行时对象推断组件/路由线索（用于无 sourcemap 的归因）
 
-## Debugging
+### 典型盲区（物理限制）
 
-If you're debugging one, you can use [Brie](https://go.briehq.com/github?utm_source=CEB) lets you capture screenshots, errors, and network activity, making it easier for us to help.
+- 跨域 iframe 内部错误（无法向跨域 frame 注入脚本）
+- Web Worker / Service Worker 内错误（默认 attach 主 Tab，不覆盖独立 worker 上下文）
+- 被业务 `try/catch` 完全吞掉且未打印/上报的错误
+- “静默逻辑错误”（不抛异常、结果不对）
+- 页面极早期错误（存在极小注入时间窗口）
 
-## Reference
+## 排错
 
-- [Chrome Extensions](https://developer.chrome.com/docs/extensions)
-- [Vite Plugin](https://vitejs.dev/guide/api-plugin.html)
-- [Rollup](https://rollupjs.org/guide/en/)
-- [Turborepo](https://turbo.build/repo/docs)
-- [Rollup-plugin-chrome-extension](https://www.extend-chrome.dev/rollup-plugin)
+### 1) 录制后没有任何日志
 
-## Star History <a name="star-history"></a>
+- 确认扩展已加载的是最新 `dist/`（重新加载已解压扩展）
+- 确认目标页面不是特殊页面（如 Chrome Web Store / 内置页面等）
+- 确认权限允许：manifest 默认包含 `host_permissions: ["<all_urls>"]` 与 `debugger` 权限
 
-<a href="https://star-history.com/#Jonghakseo/chrome-extension-boilerplate-react-vite&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Jonghakseo/chrome-extension-boilerplate-react-vite&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Jonghakseo/chrome-extension-boilerplate-react-vite&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Jonghakseo/chrome-extension-boilerplate-react-vite&type=Date" />
- </picture>
-</a>
+### 2) 断点无法命中
 
-## Contributors <a name="contributors"></a>
+- 该错误是否可复现（断点需要再次触发到相同位置）
+- 堆栈定位是否来自同一个 chunk URL（动态加载/版本切换会导致 URL 变化）
+- 生产环境压缩下 column 可能漂移，建议优先按 line 设置断点（或在 UI 中调小对 column 的依赖）
 
-This Boilerplate is made possible thanks to all of its contributors.
+### 3) AI 分析报错（Qwen）
 
-<a href="https://github.com/Jonghakseo/chrome-extension-boilerplate-react-vite/graphs/contributors">
-  <img width="500px" src="https://contrib.rocks/image?repo=Jonghakseo/chrome-extension-boilerplate-react-vite" alt="All Contributors"/>
-</a>
-
----
-
-## Special Thanks To
-
-| <a href="https://jb.gg/OpenSourceSupport"><img width="40" src="https://resources.jetbrains.com/storage/products/company/brand/logos/jb_beam.png" alt="JetBrains Logo (Main) logo."></a> | <a href="https://www.linkedin.com/in/j-acks0n"><img width="40" style="border-radius:50%" src='https://avatars.githubusercontent.com/u/23139754' alt='Jackson Hong'/></a> |
-|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-
----
-
-Made by [Jonghakseo](https://jonghakseo.github.io/)
+- 401：Key 无效/过期（在 Popup 中重新填写 DashScope API Key）
+- 429：频率/配额不足（稍后重试或检查账户额度）
+- 403：无权限访问模型（检查账号权限或模型是否可用）

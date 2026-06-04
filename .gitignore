@@ -17,6 +17,7 @@
 .DS_Store
 .idea
 **/.turbo
+logs/
 
 # compiled
 **/tailwind-output.css
