@@ -22,9 +22,12 @@ export const formatLocalTime = iso => {
  */
 export const pickPrimaryFrame = frames => {
   if (!Array.isArray(frames)) return undefined;
+  const valid = frames.filter(f => f && typeof f === 'object' && typeof f.url === 'string' && f.url);
   return (
-    frames.find(f => typeof f?.url === 'string' && f.url.startsWith('chrome-extension://')) ??
-    frames.find(f => typeof f?.url === 'string' && !f.url.startsWith('extensions::')) ??
+    valid.find(f => /^https?:\/\//.test(f.url)) ??
+    valid.find(f => /^file:\/\//.test(f.url)) ??
+    valid.find(f => !f.url.startsWith('extensions::') && !f.url.startsWith('chrome-extension://')) ??
+    valid.find(f => f.url.startsWith('chrome-extension://')) ??
     frames[0]
   );
 };
@@ -203,7 +206,7 @@ export const analyzeLog = async log => {
 
   const url = primary.url;
   const line = primary.line;
-  const column = typeof primary.column === 'number' ? primary.column : 0;
+  const column = typeof primary.column === 'number' ? primary.column : undefined;
   const functionName = typeof primary.functionName === 'string' ? primary.functionName : undefined;
 
   const generatedRes = await fetch(url);

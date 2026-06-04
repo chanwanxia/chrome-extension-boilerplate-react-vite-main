@@ -53,6 +53,62 @@ export function normalizeCallFrames(stackTrace) {
 }
 
 /**
+ * 从 V8 风格 stack 文本中解析出 (url,line,column,functionName) 列表。
+ * - 支持：`at fn (http://a/b.js:1:123)` / `at http://a/b.js:1:123`
+ * - stack 中的 column 通常是 1-based，这里统一转为 0-based 以匹配 CDP columnNumber。
+ */
+export function parseStackFramesFromText(text) {
+  const src = String(text ?? '');
+  if (!src) return [];
+
+  const lines = src.split(/\r?\n/);
+  const frames = [];
+
+  for (const rawLine of lines) {
+    const lineText = String(rawLine ?? '').trim();
+    if (!lineText.startsWith('at ')) continue;
+
+    const afterAt = lineText.slice(3).trim();
+    if (!afterAt) continue;
+
+    let functionName;
+    let locText = afterAt;
+
+    const parenStart = afterAt.lastIndexOf('(');
+    const parenEnd = afterAt.endsWith(')') ? afterAt.length - 1 : -1;
+    if (parenStart >= 0 && parenEnd > parenStart) {
+      functionName = afterAt.slice(0, parenStart).trim() || undefined;
+      locText = afterAt.slice(parenStart + 1, parenEnd).trim();
+    }
+
+    const m = locText.match(/^(.*):(\d+):(\d+)$/);
+    if (!m) continue;
+
+    const url = String(m[1] ?? '').trim();
+    const line = Number(m[2]);
+    const col1 = Number(m[3]);
+
+    if (!url) continue;
+    if (!Number.isFinite(line) || line <= 0) continue;
+    if (!Number.isFinite(col1) || col1 <= 0) continue;
+    if (url.startsWith('eval ') || url.startsWith('<anonymous>')) continue;
+
+    frames.push({
+      functionName,
+      url,
+      line,
+      column: Math.max(0, col1 - 1),
+    });
+  }
+
+  return frames;
+}
+
+function hasUsefulHttpFrame(frames) {
+  return Array.isArray(frames) && frames.some(f => typeof f?.url === 'string' && /^https?:\/\//.test(f.url));
+}
+
+/**
  * 向指定 tabId 追加一条日志并广播通知 popup 更新。
  */
 export async function pushLog(tabId, entry) {
@@ -125,10 +181,13 @@ export async function handleCdpLogEntryAdded(tabId, params) {
   if (typeof entry.url === 'string' && entry.url.trim()) textParts.push(entry.url.trim());
   const message = textParts.length ? textParts.join(' ') : '[Log.error]';
 
-  const frames = normalizeCallFrames(entry.stackTrace);
+  const framesFromTrace = normalizeCallFrames(entry.stackTrace);
+  const framesFromText = parseStackFramesFromText(message);
+  const frames = hasUsefulHttpFrame(framesFromText) ? framesFromText : framesFromTrace;
   const firstFrame = frames[0];
   const url = typeof entry.url === 'string' ? entry.url : firstFrame?.url;
   const line = typeof entry.lineNumber === 'number' ? entry.lineNumber + 1 : firstFrame?.line;
+  const column = typeof entry.columnNumber === 'number' ? entry.columnNumber : firstFrame?.column;
 
   await pushLog(tabId, {
     id: crypto.randomUUID(),
@@ -139,7 +198,7 @@ export async function handleCdpLogEntryAdded(tabId, params) {
     message,
     args: [],
     frames,
-    location: url && typeof line === 'number' ? { url, line, column: undefined } : undefined,
+    location: url && typeof line === 'number' ? { url, line, column } : undefined,
     source: typeof entry.source === 'string' ? entry.source : undefined,
   });
 }
@@ -154,7 +213,9 @@ export async function handleCdpConsoleAPICalled(tabId, params) {
 
   const args = Array.isArray(p.args) ? p.args.map(remoteObjectToPreview) : [];
   const message = args.length ? args.join(' ') : type;
-  const frames = normalizeCallFrames(p.stackTrace);
+  const framesFromTrace = normalizeCallFrames(p.stackTrace);
+  const framesFromText = parseStackFramesFromText(message);
+  const frames = hasUsefulHttpFrame(framesFromText) ? framesFromText : framesFromTrace;
   const firstFrame = frames[0];
 
   await pushLog(tabId, {
